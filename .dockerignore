@@ -1,0 +1,41 @@
+# ──────────────────────────────────────────────────────────────
+# .dockerignore — ETL HCMS v2
+# File/folder yang TIDAK ikut di-copy ke dalam Docker image
+# ──────────────────────────────────────────────────────────────
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Logs & output (di-mount via volume saat runtime)
+*.log
+output/
+
+# File sensitif — .env asli tidak masuk image, pakai env_file di compose
+.env
+
+# Git
+.git/
+.gitignore
+
+# IDE / OS
+.idea/
+.vscode/
+*.DS_Store
+Thumbs.db
+
+# Docs (tidak dibutuhkan di runtime)
+*.md
+context.md
+db_etl_fixes_log.md
+check_triggers.sql

@@ -1,0 +1,54 @@
+# ──────────────────────────────────────────────────────────────
+# ETL HCMS v2 — docker-compose.yml
+#
+# File ini SAMA untuk local maupun production (VPS).
+# Image yang dihasilkan identik — Docker menjamin itu.
+#
+# Cara pakai (local & prod sama):
+#   docker compose up -d --build            ← jalankan API server
+#   docker compose run --rm etl-script      ← jalankan ETL batch
+#   docker compose run --rm etl-script input/data.xlsx
+# ──────────────────────────────────────────────────────────────
+
+services:
+
+  # ── A. Mode API: FastAPI server yang menerima upload Excel ──
+  etl-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: etl-hcms-api
+    restart: unless-stopped # otomatis restart jika crash
+    ports:
+      - "8000:8000"
+        # local: http://localhost:8000
+        # prod : Nginx forward ke port ini
+    env_file:
+      - .env
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── B. Mode Script: jalankan ETL sekali lalu berhenti ──────
+  etl-script:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: etl-hcms-script
+    env_file:
+      - .env
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+    entrypoint: [ "python", "main.py" ]
+    profiles:
+      - script
