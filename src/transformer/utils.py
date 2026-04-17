@@ -181,6 +181,49 @@ def get_last_unk_counter() -> int:
         return 5001
 
 
+def _lookup_existing_nik_by_name(names: list[str]) -> dict[str, str]:
+    """
+    Untuk daftar nama (lowercase), query DB dan kembalikan
+    {lowercase_fullname → employee_no_subholding} yang sudah ada di DB.
+    Hanya mengambil NIK yang bukan 'unk-' (prioritas NIK asli).
+    Jika tidak ada NIK asli, fallback ke unk- yang sudah ada di DB.
+    """
+    if not DATABASE_URL or not names:
+        return {}
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT LOWER(e.fullname) AS nama_lower,
+                       rp.employee_no_subholding
+                FROM employees e
+                JOIN riwayat_pekerjaan rp ON e.employee_id = rp.employee_id
+                WHERE LOWER(e.fullname) = ANY(%(names)s)
+                ORDER BY
+                    -- Prioritaskan NIK asli (bukan unk-)
+                    CASE WHEN rp.employee_no_subholding NOT LIKE 'unk-%%' THEN 0 ELSE 1 END
+            """, {"names": names})
+            rows = cur.fetchall()
+        conn.close()
+
+        result: dict[str, str] = {}
+        for row in rows:
+            nama_lower = row["nama_lower"]
+            nik = row["employee_no_subholding"]
+            # Jangan override NIK asli dengan unk-
+            if nama_lower not in result or not nik.startswith("unk-"):
+                result[nama_lower] = nik
+
+        logger.info(
+            f"[Transformer] _lookup_existing_nik_by_name: "
+            f"{len(result)} dari {len(names)} nama ditemukan di DB."
+        )
+        return result
+    except Exception as e:
+        logger.info(f"[Transformer] ⚠  Gagal lookup NIK by name dari DB: {e}")
+        return {}
+
+
 def fill_missing_nik(
     raw_data_df: pd.DataFrame,
     assesment_df: pd.DataFrame,
@@ -221,15 +264,27 @@ def fill_missing_nik(
         logger.info("[Transformer] Semua NIK/NIP sudah terisi, tidak perlu generate ID.")
         return raw_data_df, assesment_df
 
-    # Assign unk-{n} ke setiap nama menggunakan counter yang sudah di-query di api.py
-    counter = start_counter
-    for nama in nama_to_id:
-        nama_to_id[nama] = f"unk-{counter}"
-        counter += 1
+    # Cek DB dulu: ada nama yang sudah punya NIK di DB?
+    names_lower = [n.strip().lower() for n in nama_to_id.keys()]
+    db_nik_map = _lookup_existing_nik_by_name(names_lower)
 
+    # Assign: pakai NIK dari DB jika ada, generate unk- hanya jika benar-benar baru
+    counter = start_counter
+    reused = 0
+    for nama in nama_to_id:
+        existing = db_nik_map.get(nama.strip().lower())
+        if existing:
+            nama_to_id[nama] = existing
+            reused += 1
+        else:
+            nama_to_id[nama] = f"unk-{counter}"
+            counter += 1
+
+    generated = counter - start_counter
     logger.info(
-        f"[Transformer] Ditemukan {len(nama_to_id)} NAMA dengan NIK/NIP kosong "
-        f"→ generate ID (unk-{start_counter} ... unk-{counter - 1})."
+        f"[Transformer] NIK/NIP kosong ({len(nama_to_id)} nama): "
+        f"{reused} diambil dari DB, {generated} di-generate baru "
+        f"(unk-{start_counter} ... unk-{counter - 1})."
     )
 
     def fill_df(df: pd.DataFrame, nik_col: str, nama_col: str) -> pd.DataFrame:
@@ -512,7 +567,7 @@ def transform_riwayat_pendidikan(raw_data_df: pd.DataFrame) -> pd.DataFrame:
     logger.info(f"[Transformer] riwayat_pendidikan: Total baris mentah dari Excel: {len(df)}")
     
     # Cek baris kosong
-    df_non_empty = df.dropna(subset=["TINGKAT PENDIDIKAN", "UNIVERSITAS", "JURUSAN", "TANGGAL MASUK PENDIDIKAN"], how='all')
+    df_non_empty = df.dropna(subset=["TINGKAT PENDIDIKAN", "UNIVERSITAS", "JURUSAN"], how='all')
     logger.info(f"[Transformer] riwayat_pendidikan: Setelah dibuang baris yg kosong melompong: {len(df_non_empty)}")
     
     df_final = df_non_empty.drop_duplicates().reset_index(drop=True)

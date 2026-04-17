@@ -51,7 +51,7 @@ DATASET_CONFIG: dict[str, dict] = {
     # Step 13: riwayat_pendidikan (tidak ada NIK/NIP di tabel ini)
     "riwayat_pendidikan": {
         "table": "riwayat_pendidikan",  # ← SESUAIKAN
-        "on_conflict": ["employee_id", "tingkat_pendidikan", "universitas", "jurusan", "tanggal_masuk"],
+        "on_conflict": ["employee_id", "tingkat_pendidikan", "universitas", "jurusan"],
         "column_map": {
             "employee_id":              "employee_id",
             "TINGKAT PENDIDIKAN":       "tingkat_pendidikan",
