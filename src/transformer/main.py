@@ -19,6 +19,7 @@ logger = get_logger("MainTransformer")
 
 from .utils import (
     fill_missing_nik,
+    get_last_unk_counter,
     enrich_raw_with_employee_id,
     enrich_assesment_with_employee_id,
     normalize_gender,
@@ -35,6 +36,7 @@ from .utils import (
 def run_phase1(
     raw_data_df: pd.DataFrame,
     assesment_df: pd.DataFrame,
+    unk_start_counter: int,
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """
     Phase 1: Extract + Transform dari sheet Raw Data.
@@ -55,7 +57,7 @@ def run_phase1(
 
     # Pre-process KEDUA sheet untuk NIK yang konsisten lintas sheet
     raw_data_df = normalize_gender(raw_data_df)
-    raw_data_df, assesment_df = fill_missing_nik(raw_data_df, assesment_df)
+    raw_data_df, assesment_df = fill_missing_nik(raw_data_df, assesment_df, start_counter=unk_start_counter)
 
     # DB lookup untuk Raw Data (Phase 1)
     raw_data_df = enrich_raw_with_employee_id(raw_data_df)
@@ -101,6 +103,33 @@ def run_phase2(
 
     logger.info("[Transformer Phase 2] ── Transformasi Assesment selesai ──\n")
     return datasets
+
+
+def run(
+    raw_data_df: pd.DataFrame,
+    assesment_df: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """
+    Backward-compatible wrapper untuk mode batch/CSV.
+
+    Menjalankan kedua phase transformasi lalu menggabungkan dataset dengan nama
+    yang sama agar orchestrator lama (`main.py`) tetap berfungsi setelah refactor
+    ke phase-based API.
+    """
+    datasets_phase1, preprocessed_assesment_df = run_phase1(raw_data_df, assesment_df)
+    datasets_phase2 = run_phase2(preprocessed_assesment_df)
+
+    merged_datasets = dict(datasets_phase1)
+    for name, dataframe in datasets_phase2.items():
+        if name in merged_datasets:
+            merged_datasets[name] = pd.concat(
+                [merged_datasets[name], dataframe],
+                ignore_index=True,
+            )
+        else:
+            merged_datasets[name] = dataframe
+
+    return merged_datasets
 
 
 # ── Standalone entry point ─────────────────────────────────────────────────────

@@ -124,16 +124,61 @@ def normalize_gender(raw_data_df: pd.DataFrame) -> pd.DataFrame:
 #  STEP 1 – Handle NIK/NIP kosong (unk-5001, unk-5002, ...)
 # ─────────────────────────────────────────────────────────
 
+def get_last_unk_counter() -> int:
+    """
+    Query riwayat_pekerjaan untuk mendapatkan nilai counter unk- terakhir.
+    Ambil semua employee_no_subholding yang berawalan 'unk-', strip prefix-nya,
+    parse sebagai integer, ambil yang terbesar, lalu +1 sebagai titik mulai.
+    Jika tidak ada → mulai dari 5001 (nilai awal default).
+    """
+    if not DATABASE_URL:
+        return 5001
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT REPLACE(employee_no_subholding, 'unk-', '')::int AS nomor_urut
+                FROM public.riwayat_pekerjaan
+                WHERE employee_no_subholding ~ '^unk-[0-9]+$'
+                ORDER BY nomor_urut DESC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+        conn.close()
+
+        if row is None:
+            logger.info("[Transformer] ┌─ get_last_unk_counter ─────────────────────────")
+            logger.info("[Transformer] │  Belum ada data unk- di DB")
+            logger.info("[Transformer] │  ETL akan memulai dari : unk-5001")
+            logger.info("[Transformer] └────────────────────────────────────────────────")
+            return 5001
+
+        max_num = row[0]
+        next_counter = max_num + 1
+        logger.info("[Transformer] ┌─ get_last_unk_counter ─────────────────────────")
+        logger.info(f"[Transformer] │  ID unk- terbesar di DB : unk-{max_num}")
+        logger.info(f"[Transformer] │  ETL akan memulai dari  : unk-{next_counter}")
+        logger.info("[Transformer] └────────────────────────────────────────────────")
+        return next_counter
+    except Exception as e:
+        logger.info(f"[Transformer] ⚠  Gagal query counter unk- dari DB: {e}. Mulai dari 5001.")
+        return 5001
+
+
 def fill_missing_nik(
     raw_data_df: pd.DataFrame,
     assesment_df: pd.DataFrame,
+    start_counter: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Mengecek kolom NIK/NIP di kedua sheet.
     Jika ada baris yang NIK/NIP-nya kosong:
       1. Group by NAMA → kumpulkan NAMA unik yang NIK/NIP-nya kosong
-      2. Generate ID format "unk-{n}" mulai dari n=5001
+      2. Generate ID format "unk-{n}" melanjutkan dari start_counter (sudah di-query di api.py)
       3. Isi NIK/NIP yang kosong dengan ID yang telah di-generate
+
+    Args:
+        start_counter: nilai awal counter unk- (didapat dari get_last_unk_counter() di api.py)
 
     Returns:
         (raw_data_df, assesment_df) yang sudah terisi NIK/NIP-nya
@@ -142,15 +187,12 @@ def fill_missing_nik(
     raw_nama_col = require_col(raw_data_df, "NAMA", "Raw Data")
 
     nama_to_id: dict[str, str] = {}
-    counter = 5001  # mulai dari unk-5001
 
     def collect_missing(df: pd.DataFrame, nik_col: str, nama_col: str) -> None:
-        nonlocal counter
         missing_mask = df[nik_col].isna() | (df[nik_col].astype(str).str.strip() == "")
         for nama in df.loc[missing_mask, nama_col].dropna().unique():
             if nama not in nama_to_id:
-                nama_to_id[nama] = f"unk-{counter}"
-                counter += 1
+                nama_to_id[nama] = None  # placeholder, di-assign setelah counter diketahui
 
     collect_missing(raw_data_df, raw_nik_col, raw_nama_col)
 
@@ -163,9 +205,15 @@ def fill_missing_nik(
         logger.info("[Transformer] Semua NIK/NIP sudah terisi, tidak perlu generate ID.")
         return raw_data_df, assesment_df
 
+    # Assign unk-{n} ke setiap nama menggunakan counter yang sudah di-query di api.py
+    counter = start_counter
+    for nama in nama_to_id:
+        nama_to_id[nama] = f"unk-{counter}"
+        counter += 1
+
     logger.info(
         f"[Transformer] Ditemukan {len(nama_to_id)} NAMA dengan NIK/NIP kosong "
-        f"→ generate ID (unk-5001 ... unk-{counter - 1})."
+        f"→ generate ID (unk-{start_counter} ... unk-{counter - 1})."
     )
 
     def fill_df(df: pd.DataFrame, nik_col: str, nama_col: str) -> pd.DataFrame:

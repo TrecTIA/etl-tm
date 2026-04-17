@@ -253,7 +253,10 @@ def upsert_dataset(
     return {"rows_upserted": rows_affected, "success": True}
 
 
-def save_to_postgres(datasets: dict[str, pd.DataFrame]) -> dict[str, dict]:
+def save_to_postgres(
+    datasets: dict[str, pd.DataFrame],
+    employees_exist: bool = False,
+) -> dict[str, dict]:
     """
     CRISIS FIX v2.1: Upsert semua dataset ke PostgreSQL dengan order ketat.
     
@@ -268,6 +271,9 @@ def save_to_postgres(datasets: dict[str, pd.DataFrame]) -> dict[str, dict]:
     Jika riwayat_pekerjaan GAGAL → stop dataset dependent-nya
     
     Setiap dataset tetap dalam transaction terpisah untuk isolation.
+
+    employees_exist=True : gunakan saat Phase 2, artinya employees sudah ada di DB
+                           dari Phase 1 sehingga 0 baris employees bukan dianggap gagal.
     """
     logger.info(f"\n[Loader-PG] Meng-upsert {len(datasets)} dataset ke PostgreSQL (ORDERED)...")
     
@@ -281,7 +287,8 @@ def save_to_postgres(datasets: dict[str, pd.DataFrame]) -> dict[str, dict]:
     ]
     
     results = {}
-    employees_success = False
+    # Jika Phase 2 dan employees sudah ada di DB, anggap master table sudah sukses
+    employees_success = employees_exist
     riwayat_pekerjaan_success = False
 
     for dataset_name in insert_order:

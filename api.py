@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from src.extractor.main import run_from_bytes
 from src.transformer.main import run_phase1, run_phase2
+from src.transformer.utils import get_last_unk_counter
 from src.loader.pg_utils import save_to_postgres
 
 load_dotenv()
@@ -95,8 +96,14 @@ async def upload_and_process(file: UploadFile = File(...)):
         # 2. Extract
         data = run_from_bytes(file_bytes)
 
+        # 2b. Query DB untuk counter unk- terakhir SEBELUM transform dimulai
+        #     Dilakukan di sini agar counter di-snapshot sekali saat upload,
+        #     bukan di-query ulang di tengah proses transformasi
+        unk_start_counter = get_last_unk_counter()
+        print(f"[API] Counter unk- di-snapshot: mulai dari unk-{unk_start_counter}")
+
         # 3a. Transform Phase 1: Raw Data → employees, riwayat_pendidikan, riwayat_pekerjaan
-        datasets_p1, preprocessed_ass = run_phase1(data["raw_data"], data["assesment"])
+        datasets_p1, preprocessed_ass = run_phase1(data["raw_data"], data["assesment"], unk_start_counter)
 
         # 4a. Load Phase 1 → PostgreSQL
         load_results_p1 = save_to_postgres(datasets_p1)
@@ -111,7 +118,9 @@ async def upload_and_process(file: UploadFile = File(...)):
             datasets_p2 = run_phase2(preprocessed_ass)
 
             # 4b. Load Phase 2 → PostgreSQL
-            load_results_p2 = save_to_postgres(datasets_p2)
+            # employees_exist=True: master table sudah ada dari Phase 1,
+            # 0 baris employees di Phase 2 bukan kegagalan
+            load_results_p2 = save_to_postgres(datasets_p2, employees_exist=True)
 
             # Gabungkan hasil: Phase 2 bisa override Phase 1 untuk dataset yang sama (employees, riwayat_pekerjaan)
             # tapi rows_upserted dijumlahkan agar total tetap akurat
