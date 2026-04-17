@@ -34,13 +34,29 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 #  COLUMN HELPER UTILITIES
 # ─────────────────────────────────────────────────────────
 
+def _clean_col_name(name: str) -> str:
+    """
+    Normalisasi nama kolom untuk perbandingan:
+    - Strip whitespace & newline
+    - Lowercase
+    - Hapus suffix dalam tanda kurung, e.g. '(DD/MM/YY)' atau '(DD/MM/YYYY)'
+    Contoh: 'TANGGAL LAHIR\n(DD/MM/YY)' → 'tanggal lahir'
+    """
+    # Ambil bagian sebelum newline atau tanda kurung pertama
+    cleaned = name.split("\n")[0].split("(")[0]
+    return cleaned.strip().lower()
+
+
 def normalize_col(df: pd.DataFrame, col: str) -> str | None:
     """
     Mencari nama kolom secara case-insensitive & toleran spasi.
+    Juga toleran terhadap suffix dalam tanda kurung dan newline di nama kolom Excel,
+    misalnya 'TANGGAL LAHIR (DD/MM/YY)' akan cocok dengan pencarian 'TANGGAL LAHIR'.
     Mengembalikan nama kolom asli jika ditemukan, None jika tidak.
     """
+    target = _clean_col_name(col)
     for c in df.columns:
-        if c.strip().lower() == col.strip().lower():
+        if _clean_col_name(c) == target:
             return c
     return None
 
@@ -484,8 +500,13 @@ def transform_riwayat_pendidikan(raw_data_df: pd.DataFrame) -> pd.DataFrame:
         "JURUSAN",
         "TANGGAL MASUK PENDIDIKAN",
         "TANGGAL KELUAR PENDIDIKAN",
+        "TANGGAL SELESAI PENDIDIKAN",
     ]
     col_map = get_cols(raw_data_df, WANTED, "Raw Data (pendidikan)")
+
+    # Normalise: rename 'TANGGAL SELESAI PENDIDIKAN' → 'TANGGAL KELUAR PENDIDIKAN'
+    if "TANGGAL SELESAI PENDIDIKAN" in col_map and "TANGGAL KELUAR PENDIDIKAN" not in col_map:
+        col_map["TANGGAL KELUAR PENDIDIKAN"] = col_map.pop("TANGGAL SELESAI PENDIDIKAN")
     df = select_and_rename(raw_data_df, col_map)
     # --- LOGGING TRACKING BARIS PENDIDIKAN ---
     logger.info(f"[Transformer] riwayat_pendidikan: Total baris mentah dari Excel: {len(df)}")

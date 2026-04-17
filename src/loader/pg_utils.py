@@ -33,25 +33,18 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 # Cek nama tabel: SELECT table_name FROM information_schema.tables WHERE table_schema='public';
 DATASET_CONFIG: dict[str, dict] = {
 
-    # Step 12: employees → sesuaikan nama tabel!
+    # Step 12: employees
     "employees": {
-        "table": "employees",           # sudah dikonfirmasi user
-        "on_conflict": ["employee_id"],  # gunakan employee_id sebagai PK
+        "table": "employees",
+        "on_conflict": ["employee_id"],
         "column_map": {
             "employee_id":   "employee_id",
-            "NIK/NIP":       "employee_no_subholding",
             "NAMA":          "fullname",
             "TANGGAL LAHIR": "birth_date",
-            "JOB TITLE":     "position",
-            "FUNCTION":      "functions",
-            "DIVISI":        "divisi",
-            "AGAMA":         "agama",
-            "LEVEL":         "level",
-            "GOL":           "golongan",
-            "SUBHOLDING":    "subholding_code",
-            "SUBCO":         "company_code",
-            "KJ":            "kelompok_jabatan",
             "JENIS KELAMIN": "gender",
+            # employee_no_holding diisi otomatis oleh trigger trg_set_employee_no_holding
+            # employee_no_subholding disimpan di riwayat_pekerjaan, bukan di employees
+            # email & phone_number tidak ada di Excel, diisi dari sumber lain
         },
     },
 
